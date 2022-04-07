@@ -34,31 +34,42 @@ def render_planes(H, W, focal,
         each example in batch.
       c2w: array of shape [3, 4]. Camera-to-world transformation matrix.
       ndc: bool. If True, represent ray origin, direction in NDC coordinates.
-      near: float or array of shape [batch_size]. Nearest distance for a ray.
-      far: float or array of shape [batch_size]. Farthest distance for a ray.
+      plane_depths: list. If not None, a list of depth values to evaluate the MPI at.
+      num_planes: int. The number of planes to evaluate. Used only if plane_depths is None.
       use_viewdirs: bool. If True, use viewing direction of a point in space in model.
       c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for
        camera while using other c2w argument for viewing directions.
 
     Returns:
-      rgb_map: [batch_size, 3]. Predicted RGB values for rays.
-      disp_map: [batch_size]. Disparity map. Inverse of depth.
-      acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
-      extras: dict with everything returned by render_rays().
+      result: (num_planes, H, W, 4) images of each plane
     """
 
     if plane_depths is None:
         plane_depths = np.linspace(0.0, 1.0, num_planes)
     else:
         num_planes = len(plane_depths)
+
+    result_layers = []
     for i in range(num_planes - 1):
         near_depth = plane_depths[i]
         far_depth = plane_depths[i + 1]
 
-        plane_outputs = run_nerf.render(
+        rgb, _, acc, _ = run_nerf.render(
             H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
             ndc=ndc, near=near_depth, far=far_depth, 
-            use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam,
+            use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
         )
+        acc = tf.expand_dims(acc, axis=-1)
+        result_layers.append(tf.concat((rgb, acc), axis=-1))
     
-        # do something with this
+    full_rgb = run_nerf.render(
+        H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
+        ndc=ndc, near=0, far=1.0, 
+        use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
+    )[0]
+
+    final_layer = tf.concat((full_rgb, tf.ones((H, W, 1))), axis=-1)
+
+    result_layers.append(final_layer) # only the rgb, full image at the very end
+    
+    return tf.stack(result_layers)

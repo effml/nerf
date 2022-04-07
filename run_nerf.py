@@ -287,8 +287,7 @@ def render(H, W, focal,
       acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
       extras: dict with everything returned by render_rays().
     """
-    # near = 0.6
-    # far = 0.7
+
     if c2w is not None:
         # special case to render full image
         rays_o, rays_d = get_rays(H, W, focal, c2w)
@@ -324,7 +323,7 @@ def render(H, W, focal,
     near, far = near * \
         tf.ones_like(rays_d[..., :1]), far * tf.ones_like(rays_d[..., :1])
     
-    print(rays_o[:5])
+    # print(rays_o[:5])
     near += tf.expand_dims(rays_o[..., 2], 1) + 1.0
     far += tf.expand_dims(rays_o[..., 2], 1) + 1.0 
 
@@ -368,6 +367,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         t = time.time()
         rgb, disp, acc, _ = render(
             H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        print("RGB:", rgb.shape)
+        print("acc:", acc.shape)
         rgbs.append(rgb.numpy())
         disps.append(disp.numpy())
         if i == 0:
@@ -905,6 +906,8 @@ def train():
                 rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose,
                                                 **render_kwargs_test)
 
+                print("RGB", rgb.shape)
+                print("ACC", acc.shape)
                 psnr = mse2psnr(img2mse(rgb, target))
                 
                 # Save out the validation image for Tensorboard-free monitoring
