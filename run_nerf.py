@@ -1,3 +1,4 @@
+from locale import normalize
 import os
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
@@ -286,7 +287,8 @@ def render(H, W, focal,
       acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
       extras: dict with everything returned by render_rays().
     """
-
+    # near = 0.6
+    # far = 0.7
     if c2w is not None:
         # special case to render full image
         rays_o, rays_d = get_rays(H, W, focal, c2w)
@@ -307,6 +309,7 @@ def render(H, W, focal,
         viewdirs = tf.cast(tf.reshape(viewdirs, [-1, 3]), dtype=tf.float32)
 
     sh = rays_d.shape  # [..., 3]
+    # print("ndc", ndc)
     if ndc:
         # for forward facing scenes
         rays_o, rays_d = ndc_rays(
@@ -315,8 +318,18 @@ def render(H, W, focal,
     # Create ray batch
     rays_o = tf.cast(tf.reshape(rays_o, [-1, 3]), dtype=tf.float32)
     rays_d = tf.cast(tf.reshape(rays_d, [-1, 3]), dtype=tf.float32)
+
+    normalized_directions = tf.expand_dims(tf.linalg.normalize(rays_d, axis=1)[0], 1)
+
     near, far = near * \
         tf.ones_like(rays_d[..., :1]), far * tf.ones_like(rays_d[..., :1])
+    
+    print(rays_o[:5])
+    near += tf.expand_dims(rays_o[..., 2], 1) + 1.0
+    far += tf.expand_dims(rays_o[..., 2], 1) + 1.0 
+
+    near *= normalized_directions[..., 2] + 1e-8
+    far *= normalized_directions[..., 2] + 1e-8
 
     # (ray origin, ray direction, min dist, max dist) for each ray
     rays = tf.concat([rays_o, rays_d, near, far], axis=-1)
