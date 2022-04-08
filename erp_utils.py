@@ -42,15 +42,15 @@ def get_uv(H, W):
     :return uv (N, 2) pixel coordinates in [-1.0, 1.0]
     """
     yy, xx = tf.meshgrid(
-        (tf.arange(H, dtype=tf.float32) + 0.5),
-        (tf.arange(W, dtype=tf.float32) + 0.5),
+        (tf.range(H, dtype=tf.float32) + 0.5),
+        (tf.range(W, dtype=tf.float32) + 0.5),
     )
     uv = tf.stack([xx, yy], axis=-1) # (H, W, 2)
     uv = normuv(uv, W, H) # (H, W, 2)
     return tf.reshape(uv, (H * W, 2))
 
 
-def get_r(uv, pose=DEFAULT_POSE, radii=tf.Tensor([1.])):
+def get_r(uv, pose=DEFAULT_POSE, radii=tf.constant([1.], dtype=float)):
     """
     Converts list of float radii to a per-pixel radii.
     
@@ -80,7 +80,7 @@ def get_r(uv, pose=DEFAULT_POSE, radii=tf.Tensor([1.])):
     N, _ = uv.shape
     
     R = radii.shape[-1]
-    uvr = build_uvr(uv, tf.repeat(tf.reshape(radii, (1, R)), repeats=(N, 1), axis=0))
+    uvr = build_uvr(uv, tf.repeat(tf.reshape(radii, (1, R)), repeats=N, axis=0))
     rays = erp_rays(uvr, pose) # cast rays using camera poses
     rays = tf.reshape(rays, (N, R, 7))
     O, D, t = rays[..., :3], rays[..., 3:6], rays[..., 6:] # (N, R, 3), (N, R, 3), (N, R, 1)
@@ -115,13 +115,14 @@ def build_uvr(uv, r):
     """
     R = r.shape[-1]
     N, _ = uv.shape
-    return tf.cat([
-        tf.repeat(tf.reshape(uv, (N, 1, 2)), repeats = (1, R, 1)), # (N, R, 2)
+    
+    return tf.concat([
+        tf.tile(tf.reshape(uv, (N, 1, 2)), (1, R, 1)), # (N, R, 2)
         tf.reshape(r, (N, R, 1)), # (N, R, 1)
     ], axis=-1)
 
 
-def get_uvr(H, W, pose=DEFAULT_POSE, radii=torch.Tensor([1])):
+def get_uvr(H, W, pose=DEFAULT_POSE, radii=tf.constant([1.])):
     """
     Get normalized uv coordinates + radius for image. Convenience wrapper
     for both `build_uvr` and `get_uv`.
@@ -183,7 +184,7 @@ def xyz2erp(xyz, rhs=True):
     """
     # TODO: account for pixel shift
     radii = tf.norm(xyz, axis=-1)
-    xyz = xyz / radii[..., None]
+    xyz = xyz / (radii[..., None] + 1e-8)
     lat = tf.asin(tf.clip_by_value(xyz[..., 1], -1.0, 1.0))
     lon = tf.atan2(xyz[..., 0], xyz[..., 2])
     if not rhs:
@@ -222,12 +223,12 @@ def erp_rays_batched(uvrs, poses=DEFAULT_POSE[None]):
     rays = erp2xyz(uvrs)[..., None] # BNR31
     rot = poses[..., None, None, :3, :3] # B1133
     rays = tf.matmul(rot, rays)[..., 0] # BNR3
-    lengths = tf.norm(rays, axis=-1, keepdim=True)
-    dirs = rays / lengths
+    lengths = tf.norm(rays, axis=-1, keepdims=True)
+    dirs = rays / (lengths + 1e-8)
     
     # construct ray origins
     origins = poses[:, None, None, :3, 3] # B113
-    origins = tf.repeat(origins, (1, N, R, 1)) # BNR3
+    origins = tf.tile(origins, (1, N, R, 1)) # BNR3
     
     # return rays
-    return tf.reshape(tf.cat([origins, dirs, lengths], axis=-1), (B, N * R, 7))
+    return tf.reshape(tf.concat([origins, dirs, lengths], axis=-1), (B, N * R, 7))
