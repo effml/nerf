@@ -129,6 +129,9 @@ def get_rays(H, W, focal, c2w):
     rays_o = tf.broadcast_to(c2w[:3, -1], tf.shape(rays_d))
     return rays_o, rays_d
 
+def get_rays_equirectangular(H, W, focal, c2w):
+    pass
+
 
 def get_rays_np(H, W, focal, c2w):
     """Get ray origins, directions from a pinhole camera."""

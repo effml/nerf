@@ -4,7 +4,6 @@ import tensorflow as tf
 import numpy as np
 
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
-tf.compat.v1.enable_eager_execution()
 
 # Tensorflow version of https://github.com/effml/360stereo/blob/main/tools/equirectangular.ipynb
 

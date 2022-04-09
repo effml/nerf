@@ -14,6 +14,8 @@ from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data
 
+import erp_utils
+
 
 tf.compat.v1.enable_eager_execution()
 
@@ -260,7 +262,7 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
 
 def render(H, W, focal,
            chunk=1024*32, rays=None, c2w=None, ndc=True,
-           near=0., far=1.,
+           near=0., far=1., mpi_depth=False, msi_out=False,
            use_viewdirs=False, c2w_staticcam=None,
            **kwargs):
     """Render rays
@@ -318,17 +320,18 @@ def render(H, W, focal,
     rays_o = tf.cast(tf.reshape(rays_o, [-1, 3]), dtype=tf.float32)
     rays_d = tf.cast(tf.reshape(rays_d, [-1, 3]), dtype=tf.float32)
 
-    normalized_directions = tf.expand_dims(tf.linalg.normalize(rays_d, axis=1)[0], 1)
-
     near, far = near * \
         tf.ones_like(rays_d[..., :1]), far * tf.ones_like(rays_d[..., :1])
-    
-    # print(rays_o[:5])
-    near += tf.expand_dims(rays_o[..., 2], 1) + 1.0
-    far += tf.expand_dims(rays_o[..., 2], 1) + 1.0 
+    if mpi_depth:
+        # near and far aren't a sphere, but scaled by cosine between normal and rays_d
+        # creates multiple flat planes.
+        normalized_directions = tf.expand_dims(tf.linalg.normalize(rays_d, axis=1)[0], 1)
 
-    near *= normalized_directions[..., 2] + 1e-8
-    far *= normalized_directions[..., 2] + 1e-8
+        near += tf.expand_dims(rays_o[..., 2], 1) + 1.0
+        far += tf.expand_dims(rays_o[..., 2], 1) + 1.0 
+
+        near /= normalized_directions[..., 2] + 1e-8
+        far /= normalized_directions[..., 2] + 1e-8
 
     # (ray origin, ray direction, min dist, max dist) for each ray
     rays = tf.concat([rays_o, rays_d, near, far], axis=-1)
@@ -338,6 +341,12 @@ def render(H, W, focal,
 
     # Render and reshape
     all_ret = batchify_rays(rays, chunk, **kwargs)
+    if msi_out:
+        xyz = rays_o + (rays_d / tf.linalg.normalize(rays_d, axis=1)[0]) * (near + far) / 2.0
+        uvr = erp_utils.xyz2erp(xyz)
+        
+
+    
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = tf.reshape(all_ret[k], k_sh)

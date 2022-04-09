@@ -17,11 +17,12 @@ import run_nerf
 
 tf.compat.v1.enable_eager_execution()
 
-def render_planes(H, W, focal,
+def render_planes(H, W, focal, mpi=False,
            chunk=1024*32, rays=None, c2w=None, ndc=True,
-           plane_depths=None, num_planes=12,
-           use_viewdirs=False, c2w_staticcam=None,
-           **kwargs):
+           plane_depths=None, num_planes=12, disparity=False, 
+           min_depth=0.0, max_depth=1.0,use_viewdirs=False, 
+           c2w_staticcam=None, **kwargs,
+           ):
     """Render rays
 
     Args:
@@ -45,18 +46,27 @@ def render_planes(H, W, focal,
     """
 
     if plane_depths is None:
-        plane_depths = np.linspace(0.0, 1.0, num_planes)
+        if disparity:
+            plane_depths = 1.0 / np.linspace(
+                1.0 / (min_depth + 1e-8), 
+                1.0 / max_depth, 
+                num_planes,
+            )
+        else:
+            plane_depths = np.linspace(min_depth, max_depth, num_planes)
     else:
         num_planes = len(plane_depths)
-
+    print("NUM_PLANES:", num_planes)
+    print("DEPTHS:", plane_depths)
     result_layers = []
     for i in range(num_planes - 1):
+        print("Layer", i)
         near_depth = plane_depths[i]
         far_depth = plane_depths[i + 1]
 
         rgb, _, acc, _ = run_nerf.render(
             H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
-            ndc=ndc, near=near_depth, far=far_depth, 
+            ndc=ndc, near=near_depth, far=far_depth, mpi_depth=mpi,
             use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
         )
         acc = tf.expand_dims(acc, axis=-1)
@@ -64,7 +74,7 @@ def render_planes(H, W, focal,
     
     full_rgb = run_nerf.render(
         H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
-        ndc=ndc, near=0, far=1.0, 
+        ndc=ndc, near=0, far=1.0, mpi_depth=mpi, 
         use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
     )[0]
 
