@@ -240,8 +240,9 @@ def render_rays(ray_batch,
         ret['acc0'] = acc_map_0
         ret['z_std'] = tf.math.reduce_std(z_samples, -1)  # [N_rays]
 
-    for k in ret:
-        tf.debugging.check_numerics(ret[k], 'output {}'.format(k))
+    # for k in ret:
+        # ret[k] = tf.clip_by_value(ret[k], -1e12, 1e12)
+        # tf.debugging.check_numerics(ret[k], 'output {}'.format(k))
 
     return ret
 
@@ -292,11 +293,16 @@ def render(H, W, focal,
 
     if c2w is not None:
         # special case to render full image
-        rays_o, rays_d = get_rays(H, W, focal, c2w)
+        rays_o, rays_d = None, None
+        if msi_out:
+            rays_o, rays_d = get_rays_equirectangular(H, W, focal, c2w)
+        else:
+            rays_o, rays_d = get_rays(H, W, focal, c2w)
     else:
         # use provided ray batch
         rays_o, rays_d = rays
 
+    # print("rays_d", rays_d)
     if use_viewdirs:
         # provide ray directions as input
         viewdirs = rays_d
@@ -341,11 +347,6 @@ def render(H, W, focal,
 
     # Render and reshape
     all_ret = batchify_rays(rays, chunk, **kwargs)
-    if msi_out:
-        xyz = rays_o + (rays_d / tf.linalg.normalize(rays_d, axis=1)[0]) * (near + far) / 2.0
-        uvr = erp_utils.xyz2erp(xyz)
-        
-
     
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])

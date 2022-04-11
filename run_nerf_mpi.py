@@ -20,8 +20,8 @@ tf.compat.v1.enable_eager_execution()
 def render_planes(H, W, focal, mpi=False,
            chunk=1024*32, rays=None, c2w=None, ndc=True,
            plane_depths=None, num_planes=12, disparity=False, 
-           min_depth=0.0, max_depth=1.0,use_viewdirs=False, 
-           c2w_staticcam=None, **kwargs,
+           min_depth=0.0, max_depth=1.0, msi_out=False,
+           use_viewdirs=False, c2w_staticcam=None, **kwargs,
            ):
     """Render rays
 
@@ -66,17 +66,19 @@ def render_planes(H, W, focal, mpi=False,
 
         rgb, _, acc, _ = run_nerf.render(
             H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
-            ndc=ndc, near=near_depth, far=far_depth, mpi_depth=mpi,
+            ndc=ndc, near=near_depth, far=far_depth, mpi_depth=mpi, msi_out=msi_out,
             use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
         )
+        print("rgb", rgb.shape)
         acc = tf.expand_dims(acc, axis=-1)
         result_layers.append(tf.concat((rgb, acc), axis=-1))
     
     full_rgb = run_nerf.render(
         H, W, focal, chunk=chunk, rays=rays, c2w=c2w, 
-        ndc=ndc, near=0, far=1.0, mpi_depth=mpi, 
+        ndc=ndc, near=0, far=1.0, mpi_depth=mpi, msi_out=msi_out,
         use_viewdirs=use_viewdirs, c2w_staticcam=c2w_staticcam, **kwargs,
     )[0]
+    print("full_rgb", full_rgb.shape)
 
     final_layer = tf.concat((full_rgb, tf.ones((H, W, 1))), axis=-1)
 
