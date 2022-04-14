@@ -1,3 +1,4 @@
+from locale import normalize
 import os
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
@@ -12,6 +13,8 @@ from run_nerf_helpers import *
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data
+
+import erp_utils
 
 
 tf.compat.v1.enable_eager_execution()
@@ -237,8 +240,9 @@ def render_rays(ray_batch,
         ret['acc0'] = acc_map_0
         ret['z_std'] = tf.math.reduce_std(z_samples, -1)  # [N_rays]
 
-    for k in ret:
-        tf.debugging.check_numerics(ret[k], 'output {}'.format(k))
+    # for k in ret:
+        # ret[k] = tf.clip_by_value(ret[k], -1e12, 1e12)
+        # tf.debugging.check_numerics(ret[k], 'output {}'.format(k))
 
     return ret
 
@@ -259,7 +263,7 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
 
 def render(H, W, focal,
            chunk=1024*32, rays=None, c2w=None, ndc=True,
-           near=0., far=1.,
+           near=0., far=1., mpi_depth=False, msi_out=False,
            use_viewdirs=False, c2w_staticcam=None,
            **kwargs):
     """Render rays
@@ -289,11 +293,16 @@ def render(H, W, focal,
 
     if c2w is not None:
         # special case to render full image
-        rays_o, rays_d = get_rays(H, W, focal, c2w)
+        rays_o, rays_d = None, None
+        if msi_out:
+            rays_o, rays_d = get_rays_equirectangular(H, W, focal, c2w)
+        else:
+            rays_o, rays_d = get_rays(H, W, focal, c2w)
     else:
         # use provided ray batch
         rays_o, rays_d = rays
 
+    # print("rays_d", rays_d)
     if use_viewdirs:
         # provide ray directions as input
         viewdirs = rays_d
@@ -307,6 +316,7 @@ def render(H, W, focal,
         viewdirs = tf.cast(tf.reshape(viewdirs, [-1, 3]), dtype=tf.float32)
 
     sh = rays_d.shape  # [..., 3]
+    # print("ndc", ndc)
     if ndc:
         # for forward facing scenes
         rays_o, rays_d = ndc_rays(
@@ -315,8 +325,19 @@ def render(H, W, focal,
     # Create ray batch
     rays_o = tf.cast(tf.reshape(rays_o, [-1, 3]), dtype=tf.float32)
     rays_d = tf.cast(tf.reshape(rays_d, [-1, 3]), dtype=tf.float32)
+
     near, far = near * \
         tf.ones_like(rays_d[..., :1]), far * tf.ones_like(rays_d[..., :1])
+    if mpi_depth:
+        # near and far aren't a sphere, but scaled by cosine between normal and rays_d
+        # creates multiple flat planes.
+        normalized_directions = tf.expand_dims(tf.linalg.normalize(rays_d, axis=1)[0], 1)
+
+        near += tf.expand_dims(rays_o[..., 2], 1) + 1.0
+        far += tf.expand_dims(rays_o[..., 2], 1) + 1.0 
+
+        near /= normalized_directions[..., 2] + 1e-8
+        far /= normalized_directions[..., 2] + 1e-8
 
     # (ray origin, ray direction, min dist, max dist) for each ray
     rays = tf.concat([rays_o, rays_d, near, far], axis=-1)
@@ -326,6 +347,7 @@ def render(H, W, focal,
 
     # Render and reshape
     all_ret = batchify_rays(rays, chunk, **kwargs)
+    
     for k in all_ret:
         k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
         all_ret[k] = tf.reshape(all_ret[k], k_sh)
@@ -355,6 +377,8 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
         t = time.time()
         rgb, disp, acc, _ = render(
             H, W, focal, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs)
+        print("RGB:", rgb.shape)
+        print("acc:", acc.shape)
         rgbs.append(rgb.numpy())
         disps.append(disp.numpy())
         if i == 0:
@@ -892,6 +916,8 @@ def train():
                 rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose,
                                                 **render_kwargs_test)
 
+                print("RGB", rgb.shape)
+                print("ACC", acc.shape)
                 psnr = mse2psnr(img2mse(rgb, target))
                 
                 # Save out the validation image for Tensorboard-free monitoring

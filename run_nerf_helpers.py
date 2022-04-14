@@ -5,6 +5,7 @@ import numpy as np
 import imageio
 import json
 
+import erp_utils
 
 # Misc utils
 
@@ -127,6 +128,17 @@ def get_rays(H, W, focal, c2w):
     dirs = tf.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -tf.ones_like(i)], -1)
     rays_d = tf.reduce_sum(dirs[..., np.newaxis, :] * c2w[:3, :3], -1)
     rays_o = tf.broadcast_to(c2w[:3, -1], tf.shape(rays_d))
+    return rays_o, rays_d
+
+def get_rays_equirectangular(H, W, focal, c2w):
+    # assert W / 2 == H # the correct aspect ratio
+
+    uvr = erp_utils.get_uvr(H, W, pose=c2w)
+
+    rays = erp_utils.erp_rays(uvr, pose=c2w)
+    rays_o = tf.reshape(rays[:, :3], (H, W, 3))
+    rays_d = tf.reshape(rays[:, 3:6], (H, W, 3))
+
     return rays_o, rays_d
 
 
